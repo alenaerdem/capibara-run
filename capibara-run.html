@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Capybara Run Game</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: linear-gradient(to top, #87CEEB, #ffffff);
+    font-family: 'Verdana', sans-serif;
+  }
+  canvas {
+    display: block;
+    background: linear-gradient(to top, #9be2ff, #ffffff);
+  }
+  .hud {
+    position: absolute;
+    top: 10px;
+    left: 20px;
+    color: #fff;
+    font-size: 22px;
+    text-shadow: 2px 2px 4px #000;
+    z-index: 10;
+    display: none;
+  }
+  .hud span {
+    margin-right: 30px;
+  }
+  #startBtn {
+    position: absolute;
+    top: 45%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #ffb347;
+    border: none;
+    padding: 20px 40px;
+    font-size: 24px;
+    color: #fff;
+    border-radius: 10px;
+    box-shadow: 2px 2px 5px #333;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+  #startBtn:hover {
+    background: #ff8c00;
+  }
+</style>
+</head>
+<body>
+  <div class="hud">
+    <span id="score">Score: 0</span>
+    <span id="lives">Lives: 5</span>
+  </div>
+  <button id="startBtn">Start Game</button>
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Use uploaded background music -->
+  <audio id="bgMusic" loop>
+    <source src="humorous-loop-275485.mp3" type="audio/mpeg">
+  </audio>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreDisplay = document.getElementById("score");
+    const livesDisplay = document.getElementById("lives");
+    const hud = document.querySelector(".hud");
+    const startBtn = document.getElementById("startBtn");
+    const bgMusic = document.getElementById("bgMusic");
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let score, lives, obstacles, gameSpeed, gravity, jumpStrength, capybara, animationId;
+    let keys = {};
+    let lastJumpTime = 0;
+    let feedbacks = [];
+    let gameRunning = false;
+
+    const capybaraImg = new Image();
+    capybaraImg.src = "https://static.vecteezy.com/system/resources/thumbnails/057/188/171/small_2x/funny-and-cute-capybara-bouncing-energetically-on-transparent-background-free-png.png";
+    const cactusImg = new Image();
+    cactusImg.src = "https://static.vecteezy.com/system/resources/previews/047/920/898/non_2x/cluster-of-cacti-with-rocks-isolated-on-a-transparent-background-free-png.png";
+    const treeImg = new Image();
+    treeImg.src = "https://png.pngtree.com/png-vector/20240906/ourmid/pngtree-cartoon-tree-isolated-on-white-png-image_13760839.png";
+
+    window.addEventListener("keydown", (e) => keys[e.key] = true);
+    window.addEventListener("keyup", (e) => keys[e.key] = false);
+
+    function resetGame() {
+      score = 0;
+      lives = 5;
+      obstacles = [];
+      gameSpeed = 6;
+      gravity = 0.8;
+      jumpStrength = -16;
+      feedbacks = [];
+      capybara = {
+        x: 100,
+        y: 0,
+        width: 100,
+        height: 70,
+        dy: 0,
+        grounded: false
+      };
+      hud.style.display = "block";
+      scoreDisplay.textContent = "Score: " + score;
+      livesDisplay.textContent = "Lives: " + lives;
+      bgMusic.currentTime = 0;
+      bgMusic.volume = 0.4;
+      bgMusic.play().catch(()=>console.log("Autoplay blocked"));
+      gameRunning = true;
+      gameLoop();
+    }
+
+    function stopGame() {
+      gameRunning = false;
+      cancelAnimationFrame(animationId);
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "50px Verdana";
+      ctx.textAlign = "center";
+      ctx.fillText("Game Over!", canvas.width / 2, canvas.height / 2);
+      startBtn.innerText = "Restart Game";
+      startBtn.style.display = "block";
+      startBtn.style.top = "40%";
+      bgMusic.pause();
+    }
+
+    function jump() {
+      const now = Date.now();
+      if (capybara.grounded) {
+        capybara.dy = jumpStrength;
+        capybara.grounded = false;
+        lastJumpTime = now;
+      } else if (now - lastJumpTime < 400 && now - lastJumpTime > 70) {
+        capybara.dy = jumpStrength * 1.1;
+        lastJumpTime = 0;
+      }
+    }
+
+    function moveCapybara() {
+      if ((keys["ArrowUp"] || keys[" "])) jump();
+      if (keys["ArrowLeft"]) capybara.x -= 5;
+      if (keys["ArrowRight"]) capybara.x += 5;
+
+      if (capybara.x < 0) capybara.x = 0;
+      if (capybara.x + capybara.width > canvas.width)
+        capybara.x = canvas.width - capybara.width;
+    }
+
+    function updateCapybara() {
+      capybara.y += capybara.dy;
+      if (capybara.y + capybara.height >= canvas.height - 80) {
+        capybara.y = canvas.height - 80 - capybara.height;
+        capybara.dy = 0;
+        capybara.grounded = true;
+      } else {
+        capybara.dy += gravity;
+      }
+    }
+
+    // Adjust obstacle spawning for double-jump challenge
+    function spawnObstacle() {
+      if (Math.random() < 0.02 && obstacles.length < 4) {
+        const isTree = Math.random() > 0.5;
+        const lastObstacle = obstacles[obstacles.length - 1];
+        let minGap = 300;
+        let maxGap = 800;
+
+        // Occasionally spawn closer obstacles for double jump
+        if (Math.random() < 0.25) {
+          minGap = 220;
+          maxGap = 400;
+        }
+
+        if (!lastObstacle || lastObstacle.x < canvas.width - Math.random() * (maxGap - minGap) - minGap) {
+          obstacles.push({
+            x: canvas.width,
+            y: canvas.height - 100,
+            width: isTree ? 90 : 70,
+            height: isTree ? 120 : 90,
+            type: isTree ? "tree" : "cactus",
+            scored: false
+          });
+        }
+      }
+    }
+
+    function updateObstacles() {
+      obstacles.forEach((obs, i) => {
+        obs.x -= gameSpeed;
+        let collWidth = obs.width * (obs.type === "tree" ? 0.85 : 0.8);
+        let collHeight = obs.height * (obs.type === "tree" ? 0.85 : 0.8);
+        const collX = obs.x + (obs.width - collWidth) / 2;
+        const collY = obs.y + (obs.height - collHeight) / 2;
+
+        if (
+          capybara.x < collX + collWidth &&
+          capybara.x + capybara.width > collX &&
+          capybara.y + capybara.height > collY
+        ) {
+          obstacles.splice(i, 1);
+          lives--;
+          livesDisplay.textContent = "Lives: " + lives;
+          feedbacks.push({ text: "Ouch!", x: capybara.x + capybara.width/2, y: capybara.y, color: "red", alpha: 1, dy: -1 });
+          if (lives <= 0) stopGame();
+        }
+
+        if (obs.x + obs.width < capybara.x && !obs.scored) {
+          const points = obs.type === "tree" ? 7 : 5;
+          score += points;
+          obs.scored = true;
+          feedbacks.push({ text: `+${points}`, x: capybara.x + capybara.width/2, y: capybara.y, color: "yellow", alpha: 1, dy: -1 });
+        }
+
+        if (obs.x + obs.width < 0) obstacles.splice(i, 1);
+      });
+    }
+
+    function drawFeedbacks() {
+      feedbacks.forEach((fb, i) => {
+        ctx.font = "bold 36px Verdana";
+        ctx.textAlign = "center";
+        ctx.fillStyle = fb.color;
+        ctx.globalAlpha = fb.alpha;
+        ctx.fillText(fb.text, fb.x, fb.y);
+        ctx.globalAlpha = 1.0;
+        fb.y += fb.dy;
+        fb.alpha -= 0.02;
+        if (fb.alpha <= 0) feedbacks.splice(i, 1);
+      });
+    }
+
+    function drawObstacles() {
+      obstacles.forEach(obs => {
+        if (obs.type === "tree")
+          ctx.drawImage(treeImg, obs.x, obs.y - obs.height + 10, obs.width, obs.height);
+        else
+          ctx.drawImage(cactusImg, obs.x, obs.y - obs.height + 10, obs.width, obs.height);
+      });
+    }
+
+    function drawCapybara() {
+      ctx.drawImage(capybaraImg, capybara.x, capybara.y, capybara.width, capybara.height);
+    }
+
+    function drawGround() {
+      ctx.fillStyle = "#4CAF50";
+      ctx.fillRect(0, canvas.height - 80, canvas.width, 80);
+    }
+
+    function drawHUD() {
+      scoreDisplay.textContent = "Score: " + score;
+    }
+
+    function gameLoop() {
+      if (!gameRunning) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGround();
+      moveCapybara();
+      updateCapybara();
+      spawnObstacle();
+      updateObstacles();
+      drawObstacles();
+      drawCapybara();
+      drawHUD();
+      drawFeedbacks();
+      animationId = requestAnimationFrame(gameLoop);
+    }
+
+    startBtn.addEventListener("click", () => {
+      startBtn.style.display = "none";
+      resetGame();
+    });
+  </script>
+</body>
+</html>
